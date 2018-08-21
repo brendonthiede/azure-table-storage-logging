@@ -1,0 +1,117 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "webAppName": {
+      "type": "string",
+      "defaultValue": "ats-logging-research",
+      "metadata": {
+        "description": "Name for the web app (affects URL)."
+      }
+    },
+    "appServicePlanPricingTierSkuCode": {
+      "type": "string",
+      "allowedValues": [
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "defaultValue": "B1",
+      "metadata": {
+        "description": "The code for the pricing tier to use for the app service plan."
+      }
+    }
+  },
+  "variables": {
+    "location": "[resourceGroup().location]",
+    "appServicePlanName": "[concat(parameters('webAppName'), '-asplan')]",
+    "appServicePlanReference": "[concat(subscription().id, '/resourceGroups/', resourceGroup().name, '/providers/Microsoft.Web/serverfarms/', variables('appServicePlanName'))]",
+    "logStorageAccount": "[concat('logs', uniqueString(resourceGroup().id))]"
+  },
+  "resources": [
+    {
+      "comments": "App Service Plan",
+      "apiVersion": "2016-09-01",
+      "name": "[variables('appServicePlanName')]",
+      "type": "Microsoft.Web/serverfarms",
+      "location": "[variables('location')]",
+      "tags": {
+        "displayName": "AppServicePlan"
+      },
+      "sku": {
+        "name": "[parameters('appServicePlanPricingTierSkuCode')]",
+        "capacity": 1
+      },
+      "properties": {
+        "name": "[variables('appServicePlanName')]"
+      },
+      "dependsOn": []
+    },
+    {
+      "comments": "Storage to be used as a Serilog sink",
+      "type": "Microsoft.Storage/storageAccounts",
+      "kind": "StorageV2",
+      "name": "[variables('logStorageAccount')]",
+      "apiVersion": "2018-02-01",
+      "location": "[variables('location')]",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "properties": {
+        "supportsHttpsTrafficOnly": true,
+        "accessTier": "Hot"
+      },
+      "dependsOn": []
+    },
+    {
+      "comments": "App Service",
+      "apiVersion": "2016-08-01",
+      "name": "[parameters('webAppName')]",
+      "type": "Microsoft.Web/sites",
+      "location": "[variables('location')]",
+      "tags": {
+        "[concat('hidden-related:', variables('appServicePlanReference'))]": "Resource",
+        "displayName": "AppService"
+      },
+      "properties": {
+        "name": "[parameters('webAppName')]",
+        "serverFarmId": "[variables('appServicePlanReference')]",
+        "clientAffinityEnabled": false,
+        "httpsOnly": true,
+        "siteConfig": {
+          "http20Enabled": true,
+          "minTlsVersion": "1.2",
+          "appSettings": [
+            {
+              "name": "MSDEPLOY_RENAME_LOCKED_FILES",
+              "value": "1"
+            },
+            {
+              "name": "AzureStorageConnectionString",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('logStorageAccount'),';AccountKey=',listkeys(variables('logStorageAccount'), '2018-02-01').keys[0].value)]"
+            }
+          ],
+          "cors": {
+            "allowedOrigins": [
+              "*"
+            ]
+          }
+        }
+      },
+      "dependsOn": [
+        "[variables('appServicePlanName')]",
+        "[variables('logStorageAccount')]"
+      ]
+    }
+  ],
+  "outputs": {
+    "webAppName": {
+      "type": "string",
+      "value": "[parameters('webAppName')]"
+    },
+    "webAppUri": {
+      "type": "string",
+      "value": "[reference(concat('Microsoft.Web/sites/', parameters('webAppName'))).hostnames[0]]"
+    }
+  }
+}
